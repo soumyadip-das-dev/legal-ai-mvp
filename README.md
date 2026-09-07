@@ -1,205 +1,192 @@
-# ⚖️ Legal AI — Research Assistant
+# ⚖️ Legal AI — Supreme Court Semantic Search & Draft Assistant
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white" />
-  <img src="https://img.shields.io/badge/Streamlit-1.x-FF4B4B?logo=streamlit&logoColor=white" />
-  <img src="https://img.shields.io/badge/FAISS-CPU-blueviolet?logo=meta&logoColor=white" />
-  <img src="https://img.shields.io/badge/Sentence_Transformers-all--MiniLM--L6--v2-orange" />
-  <img src="https://img.shields.io/badge/License-MIT-green" />
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/Streamlit-1.x-FF4B4B?logo=streamlit&logoColor=white" alt="Streamlit" />
+  <img src="https://img.shields.io/badge/FAISS-CPU_Flat_L2-00599C?logo=meta&logoColor=white" alt="FAISS" />
+  <img src="https://img.shields.io/badge/Sentence_Transformers-all--MiniLM--L6--v2-FFA000" alt="Sentence Transformers" />
+  <img src="https://img.shields.io/badge/License-MIT-2ECC71" alt="License" />
 </p>
 
-> A semantic search engine and automated legal document generation tool built over **Indian Supreme Court landmark judgments** — powered by FAISS vector embeddings, Sentence Transformers, and a custom 4-pass citation-aware ranking algorithm.
+> A domain-specific semantic search engine and automated document generation tool built over landmark **Supreme Court of India criminal judgments** — combining dense vector embeddings, a custom multi-pass legal holding ranker, and an interactive Streamlit application.
 
 ---
 
-## ✨ Feature Highlights
+## 📌 Motivation & Problem Statement
 
-| Feature | Description |
-|---|---|
-| 🔍 **Semantic Search** | Dense vector retrieval using `all-MiniLM-L6-v2` over 370+ indexed paragraphs |
-| 🏛️ **Citation-Aware Ranking** | 4-pass priority system: direct holdings → precedent holdings → observations → fallbacks |
-| 📄 **Legal Research Note Generator** | One-click synthesis of key legal principles from retrieved case law |
-| 📝 **Bail Application Draft Generator** | Auto-populated first draft with case metadata and cited Supreme Court precedents |
-| ⬇️ **Download Documents** | Export generated notes and bail drafts as `.txt` files |
-| 🌙 **Dark Theme UI** | Custom CSS design system with Google Fonts (`Inter`), gradient badges, and hover cards |
-| ⌨️ **Search on Enter** | Instant search triggered by pressing Enter or clicking the Search button |
+Legal research in Indian case law is traditionally bottlenecked by unstructured, multi-page PDFs that contain recurring watermark artifacts, irregular line breaks, and dense judicial language. Standard keyword search frequently falls short because:
+
+1. **Vocabulary Mismatch:** Keyword queries miss synonymous legal concepts (e.g., searching *"illegal detention"* can fail to match rulings discussing *"custodial restraint without statutory procedure"*).
+2. **Lack of Precedent Hierarchy:** Off-the-shelf vector search models treat factual narrations, passing observations (*obiter dicta*), and binding legal principles (*ratio decidendi*) with equal semantic priority, often surfacing case facts instead of the core rule of law.
+
+### Why I Built This (Student Engineering Perspective)
+Rather than wrapping a generic third-party LLM API around raw text, I wanted to build the foundational data engineering and retrieval layers from scratch:
+- Designing a robust heuristic PDF ingestion pipeline to clean and stitch legal text without losing context.
+- Indexing dense semantic representations locally using FAISS and Sentence Transformers.
+- Implementing a domain-aware, multi-pass ranking system that prioritizes binding holdings over secondary quotations.
 
 ---
 
-## 🗂️ Project Architecture
+## 🏛️ System Architecture
 
 ```
-legal_ai/
-├── data/
-│   ├── raw_pdfs/           # Source PDF judgments (place your PDFs here)
-│   ├── processed/
-│   │   └── judgments.json  # Structured paragraph database (auto-generated)
-│   └── faiss_index/        # FAISS vector index files (auto-generated)
-├── ingest.py               # PDF extraction, paragraph stitching & metadata tagging engine
-├── build_index.py          # Sentence Transformer embedding + FAISS index builder
-├── search_engine.py        # 4-pass similarity search & citation-aware ranking module
-├── streamlit_app.py        # Streamlit web application (UI + document generators)
-├── CHANGELOG.md            # Detailed time-stamped project history & technical learnings
-├── ROADMAP.md              # Planned enhancements & future features
-├── .gitignore              # Excludes venv, __pycache__, large data files
-└── README.md               # This file
+                                [ Raw Supreme Court PDFs ]
+                                             │
+                                             ▼
+                                  [ ingest.py Pipeline ]
+                     ┌───────────────────────┴───────────────────────┐
+                     ▼                                               ▼
+        [ Junk Filter & Normalizer ]                    [ Lookahead Sentence Stitcher ]
+        • Strips Kanoon watermarks                     • Merges cross-page linebreaks
+        • Filters running page headers                 • Detects true paragraph boundaries
+                     └───────────────────────┬───────────────────────┘
+                                             │
+                                             ▼
+                                 [ Paragraph Classifier ]
+                                 • Type: RATIO / FACTS / OTHER
+                                 • Cross-citation regex & self-ref suppression
+                                             │
+                                             ▼
+                                  [ build_index.py ]
+                            sentence-transformers/all-MiniLM-L6-v2
+                                             │
+                                             ▼
+                                    [ FAISS Flat Index ]
+                                             │
+                                             ▼
+                                 [ search_engine.py ]
+                             6-Tier / 4-Pass Priority Ranker
+                                             │
+                                             ▼
+                                [ streamlit_app.py UI ]
+                   ┌─────────────────────────┴─────────────────────────┐
+                   ▼                                                   ▼
+        [ Semantic Search Cards ]                           [ Document Synthesis Engine ]
+        • Ratio / Citation badges                           • Legal Research Notes
+        • Dynamic metadata filters                          • Pre-populated Bail Drafts
 ```
 
 ---
 
-## 🧠 How It Works
+## ⚙️ Core Technical Implementation
 
-### 1. Ingestion Pipeline (`ingest.py`)
-- Loads all PDFs from `data/raw_pdfs/` (case-insensitive extension matching)
-- Strips running headers, footers, page numbers, and Indian Kanoon watermarks via `is_junk_line()`
-- Stitches fragmented lines across page boundaries using lookahead-based `is_paragraph_end()` detection
-- Classifies each paragraph into: `RATIO`, `FACTS`, or `OTHER`
-- Detects cross-citations while filtering false-positive self-citations
+### 1. PDF Text Defragmentation & Cleaning Pipeline (`ingest.py`)
+- **Heuristic Noise Filtering:** Implemented `is_junk_line()` to dynamically detect and remove recurring page headers (matching case titles), page counters, and Indian Kanoon watermarks before text assembly.
+- **Lookahead Sentence Stitching:** Standard line-by-line extraction splits sentences across page breaks. Built an abbreviation-aware lookahead buffer (`is_paragraph_end`) that checks subsequent character casing (`next_line[0].islower()`) and terminal punctuation (`."`, `.)`) to merge fragmented lines.
+- **Data Recovery Impact:** Fixed arbitrary line truncation and extension-matching issues, expanding indexed text from an initial **124 fragmented paragraphs to 372 rich, cohesive paragraphs (~3x data density increase)** across 6 landmark cases.
 
-### 2. Index Building (`build_index.py`)
-- Encodes all paragraphs using `sentence-transformers/all-MiniLM-L6-v2`
-- Stores dense embeddings in a FAISS flat L2 index for nearest-neighbor retrieval
+### 2. Legal Metadata Extraction & Citation Isolation
+- Used regex matching (`X v. Y` / `A vs. B`) with self-reference filtering: if a cited title matches the judgment's own title, it is flagged as `is_cross_citation = False` so core holdings are not misclassified as external quotations.
+- Tagged paragraphs into categorical types: `RATIO` (core holdings), `FACTS` (case background), and `OTHER` (procedural orders and guidelines).
 
-### 3. Search Engine (`search_engine.py`)
-Implements a **6-tier priority ranking**:
+### 3. Multi-Pass Priority Search Algorithm (`search_engine.py`)
+Dense retrieval alone often ranks lengthy factual summaries highly if they mention query terms frequently. To surface authoritative law first, the search engine retrieves top-$K$ candidate vectors ($L_2$ distance) and re-ranks them through a **6-tier priority filter**:
 
-| Pass | Para Type | Cross-Citation | Priority |
-|------|-----------|----------------|----------|
-| 1 | `RATIO` | No | ⭐⭐⭐ Highest |
-| 2 | `RATIO` | Yes | ⭐⭐ |
-| 3 | `OTHER` | No | ⭐⭐ |
-| 4 | `OTHER` | Yes | ⭐ |
-| 5 | `FACTS` | No | Low |
-| 6 | `FACTS` | Yes | Lowest |
+| Pass | Target Content | Cross-Citation | Priority Level |
+| :---: | :--- | :---: | :--- |
+| **Pass 1** | Direct *ratio decidendi* / binding holding | No | ⭐⭐⭐ **Highest** |
+| **Pass 2** | *Ratio decidendi* quoting precedent | Yes | ⭐⭐ **High** |
+| **Pass 3** | Direct judicial observation / guideline (`OTHER`) | No | ⭐⭐ **High** |
+| **Pass 4** | Precedent-backed observation (`OTHER`) | Yes | ⭐ **Medium** |
+| **Pass 5** | Case facts (`FACTS`) | No | Low |
+| **Pass 6** | General fallback matches | Any | Lowest |
 
-### 4. Streamlit App (`streamlit_app.py`)
-- Search bar with Enter-key trigger and `🔍 Search` button
-- Results displayed as styled cards with `RATIO` / `Observation` / `Quoted Case` / `¶ N` badges
-- Sidebar collects optional case metadata for bail draft generation
-- Document generators use `on_click` callbacks to guarantee reliable Streamlit state updates
+### 4. Interactive Frontend & Draft Generation (`streamlit_app.py`)
+- **Reliable State Management:** Replaced inline button checks with explicit `on_click` and `on_change` callbacks (`do_search`, `do_generate_note`, `do_generate_draft`), eliminating session-state drops during Streamlit rerenders.
+- **Keyboard Search Trigger:** Bound query input to `on_change=do_search` to enable instant search execution on the `Enter` key.
+- **Automated Draft Synthesis:** Converts retrieved holding paragraphs and sidebar case parameters (FIR details, applicant name, custody date) into structured **Legal Research Notes** and court-ready **Bail Application Drafts**, downloadable as `.txt` files.
 
 ---
 
-## 📚 Indexed Case Law
+## 📚 Indexed Landmark Case Law
 
-| Case | Court | Year | Paragraphs |
-|------|-------|------|------------|
-| Arnesh Kumar v. State of Bihar | Supreme Court of India | 2014 | 20 |
-| D.K. Basu v. State of West Bengal | Supreme Court of India | 1997 | 83 |
-| Joginder Kumar v. State of Uttar Pradesh | Supreme Court of India | 1994 | 37 |
-| Lalita Kumari v. Government of Uttar Pradesh | Supreme Court of India | 2014 | 170 |
-| Manubhai Ratilal Patel v. State of Gujarat | Supreme Court of India | 2013 | 34 |
-| State of Haryana v. Bhajan Lal | Supreme Court of India | 1992 | 28 |
-| **Total** | | | **~372 paragraphs** |
+The benchmark dataset consists of seminal Supreme Court of India rulings governing criminal procedure, personal liberty, and arrest safeguards:
+
+| Case Law | Bench & Year | Primary Legal Principle | Paragraphs |
+| :--- | :--- | :--- | :---: |
+| *Arnesh Kumar v. State of Bihar* | Supreme Court (2014) | Mandatory notice & arrest checklist under Sec 41 CrPC | 20 |
+| *D.K. Basu v. State of West Bengal* | Supreme Court (1997) | Constitutional safeguards against custodial violence | 83 |
+| *Joginder Kumar v. State of U.P.* | Supreme Court (1994) | Distinction between power to arrest and justification | 37 |
+| *Lalita Kumari v. Govt. of U.P.* | Supreme Court (2014) | Mandatory registration of FIR in cognizable offenses | 170 |
+| *Manubhai Ratilal Patel v. State of Gujarat* | Supreme Court (2013) | Judicial application of mind required during remand | 34 |
+| *State of Haryana v. Bhajan Lal* | Supreme Court (1992) | Standard guidelines for quashing malicious FIRs | 28 |
+| **Total Indexed Corpus** | — | — | **372 paragraphs** |
 
 ---
 
-## 🚀 Quickstart
+## 🚀 Quickstart Guide
 
 ### Prerequisites
 - Python 3.10+
 - Git
 
-### Step 1 — Clone the repository
-
+### 1. Clone Repository & Setup Virtual Environment
 ```bash
-git clone https://github.com/YOUR_USERNAME/legal_ai.git
-cd legal_ai
-```
+git clone https://github.com/soumyadip-das-dev/Legal-AI-Research-Assistant.git
+cd Legal-AI-Research-Assistant
 
-### Step 2 — Create & activate virtual environment
-
-```bash
-# Windows
+# Create virtual environment
 python -m venv venv
+
+# Activate virtual environment
+# Windows:
 venv\Scripts\activate
-
-# Linux / macOS
-python -m venv venv
+# Linux / macOS:
 source venv/bin/activate
 ```
 
-### Step 3 — Install dependencies
-
+### 2. Install Dependencies
 ```bash
 pip install streamlit faiss-cpu sentence-transformers pdfplumber tqdm langchain-community
 ```
 
-### Step 4 — Add your PDFs
-
-Place Supreme Court judgment PDFs inside `data/raw_pdfs/`.
-
-**Naming convention:** `Case_Name_vs_Respondent_YEAR.pdf`
-
-```
-data/raw_pdfs/
-├── Arnesh_Kumar_vs_State_of_Bihar_2014.pdf
-├── DK_Basu_vs_State_of_West_Bengal_1997.pdf
-└── ...
-```
-
-### Step 5 — Build the knowledge base
-
+### 3. Build the Database & Vector Index
 ```bash
-python ingest.py       # Parse and process all PDFs
-python build_index.py  # Build the FAISS vector index
+# Extract, clean, and categorize paragraphs into data/processed/judgments.json
+python ingest.py
+
+# Generate dense embeddings and initialize FAISS index at data/faiss_index/
+python build_index.py
 ```
 
-### Step 6 — Launch the app
-
+### 4. Run the Streamlit Application
 ```bash
 streamlit run streamlit_app.py
 ```
-
-Open **http://localhost:8501** in your browser.
-
----
-
-## 💡 Usage Tips
-
-- **Search examples**: `arrest guidelines`, `bail conditions`, `FIR registration mandatory`, `custodial torture rights`
-- Fill in the **sidebar fields** before generating a Bail Draft to get a pre-populated document
-- Click **📄 Generate Research Note** to synthesize key holdings from search results
-- Click **📝 Generate Bail Draft** to create a court-ready first draft
-- Use the **⬇ Download** buttons to save documents as `.txt` files
+Open **http://localhost:8501** in your web browser.
 
 ---
 
-## 🛠️ Tech Stack
+## 💡 Example Queries to Test
 
-| Component | Technology |
-|---|---|
-| UI Framework | [Streamlit](https://streamlit.io/) |
-| Vector Embeddings | [Sentence Transformers](https://www.sbert.net/) (`all-MiniLM-L6-v2`) |
-| Vector Database | [FAISS](https://faiss.ai/) (CPU) |
-| PDF Parsing | [pdfplumber](https://github.com/jsvine/pdfplumber) |
-| Progress Tracking | [tqdm](https://tqdm.github.io/) |
-| Language | Python 3.10+ |
+| Query | Expected Retrieval |
+| :--- | :--- |
+| `"mandatory FIR registration cognizable offence"` | Surfaces binding holding from *Lalita Kumari (2014)* |
+| `"guidelines to prevent unnecessary arrest"` | Retrieves Section 41 CrPC checklist from *Arnesh Kumar (2014)* |
+| `"custodial torture arrestee rights inspection memo"` | Returns procedural guidelines from *D.K. Basu (1997)* |
+| `"grounds for quashing criminal proceedings"` | Ranks illustrative quashing criteria from *Bhajan Lal (1992)* |
+
+---
+
+## 🛠️ Key Technical Learnings
+
+1. **PDF Text Stream Realities:** Standard PDF extractors emit text by bounding-box coordinates rather than grammatical flow. Robust extraction requires line-level noise filtering and lookahead casing heuristics before feeding data to an embedding model.
+2. **Metadata-Guided Re-ranking:** Dense embeddings alone struggle with domain hierarchy. Incorporating structural classification (e.g., distinguishing *ratio decidendi* from *facts*) into a multi-pass ranking algorithm substantially improves legal relevance over naive nearest-neighbor search.
+3. **Reactive UI State:** In Streamlit, coupling long-running actions or multi-step draft generation to explicit callback functions avoids unpredictable state resets across UI reruns.
 
 ---
 
 ## 🗺️ Roadmap
 
-See [ROADMAP.md](./ROADMAP.md) for planned features including multi-document upload, Gemini/GPT-powered Q&A, full-text Boolean search, and cloud deployment.
+Planned features and technical improvements:
+- [ ] Hybrid search combining dense embeddings with BM25 lexical search (Reciprocal Rank Fusion).
+- [ ] Contextual Q&A using open-source instruction-tuned LLMs (e.g., Mistral-7B / Llama-3).
+- [ ] Automated evaluation suite measuring Mean Reciprocal Rank (MRR) across a golden test set of legal queries.
+- [ ] Cloud deployment on Streamlit Community Cloud / Hugging Face Spaces.
 
 ---
 
-## 📋 Changelog
+## 📜 License & Disclaimer
 
-See [CHANGELOG.md](./CHANGELOG.md) for a detailed log of all changes, bug fixes, and technical learnings across all development phases.
-
----
-
-## ⚠️ Disclaimer
-
-This tool is for **legal research and educational purposes only**. Generated documents (research notes, bail drafts) are **first drafts** and must be reviewed by a qualified legal professional before use in any proceedings.
-
----
-
-## 📜 License
-
-This project is licensed under the **MIT License**.
-
----
-
-<p align="center">Built with ❤️ using Streamlit · FAISS · Sentence Transformers</p>
+- **License:** Licensed under the [MIT License](LICENSE).
+- **Disclaimer:** This software is developed for educational and academic research purposes. Generated research notes and bail drafts are initial drafts and do not constitute formal legal advice.
